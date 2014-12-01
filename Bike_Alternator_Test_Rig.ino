@@ -17,8 +17,8 @@ volatile int hallSenseIndex = 0;           // Counts how many times the hall sen
 const int setpointPin = 0;  // The setpoint is on analog pin 0
 
 // Converted speed input and setpoint variables
-float speedMax = 30.0;    // Max speed in MPH, multiplied by 1000 to reduce floating point math
-float speedMin = 3.0;     // Min speed in MPH, multiplied by 1000 to reduce floating point math
+float speedMax = 30000.0;    // Max speed in MPH, multiplied by 1000 to reduce floating point math
+float speedMin = 3000.0;     // Min speed in MPH, multiplied by 1000 to reduce floating point math
 float hallSpeed = 0.0;               // The 
 long int hallSenseNow = 0;
 long int hallSenseLast = 0;
@@ -99,15 +99,15 @@ void readSetpoint() {
     setpointSpeed = 0;
     return;
   }
-  setpointSpeed = map(setpointRaw,2,1023,speedMin*1000.0,speedMax*1000.0)/1000.0;
+  setpointSpeed = map(setpointRaw,2,1023,speedMin,speedMax);
 }
 
 void calculateSpeed() {
   int hallTimeAvg = (hallSenseTimes[0] + hallSenseTimes[1] + hallSenseTimes[2]) / 3;
   // 1 count is: 0.0625 Rev / hallTimeAvg uS
   // 16 counts/rev, 24.7400 inches/rev, 3600 s/h, 63360 in/mi
-  // Offline dimensional analysis gives us the following to convert to MPH
-  hallSpeed =  87855.11364 / hallTimeAvg;
+  // Offline dimensional analysis gives us the following to convert to thousands of MPH
+  hallSpeed = 87855113.64 / hallTimeAvg;
 }
 
 void setDacOutput() {
