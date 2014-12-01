@@ -33,15 +33,15 @@ const int dacOutMax = 4095;   // The highest usable DAC output value
       int dacOutput = dacOutMin;          // The value sent to the DAC
 
 // PID compute parameters
-const float gainProportional = 0.01;  // How much to multiply the instataneous error between the input and setpoint
-const float gainIntegral = 0.001;      // How much to multiply the time-aggregated error between the input and the setpoint
-const float gainDerivative = 0.0025;    // How much to multiply the change in error frm the previous reading
+const float gainProportional = 0.005;  // How much to multiply the instataneous error between the input and setpoint
+const float gainIntegral = 0.00002;      // How much to multiply the time-aggregated error between the input and the setpoint
+const float gainDerivative = 0.0005;    // How much to multiply the change in error frm the previous reading
 float errorProportional = 0.0;
 float errorIntegral = 0.0;
-float errorIntegralMax = speedMax/10.0;
-float errorIntegralMin = speedMax/10.0 * -1.0;
+float errorIntegralMax = speedMax/10000.0;
+float errorIntegralMin = speedMax/10000.0 * -1.0;
 float errorDerivative = 0.0;
-const int computePidInterval = 50;  // How often to update the DAC in millis() (should be an even division of one second, to avoid floating point math)
+const int computePidInterval = 111;  // How often to update the DAC in millis() (should be an even division of one second, to avoid floating point math)
 long  int computePidLast = 0;        // When the setpoint was last read
 float outputAdjustmentFactor = 0.0;
 
@@ -111,24 +111,28 @@ void calculateSpeed() {
 }
 
 void setDacOutput() {
-  errorNow = setpointSpeed - hallSpeed;                           // Difference between setpoint and actual
-  errorProportional = errorNow * gainProportional;                // Calculate the proportional adjustment value in terms of the input and setpoint units
-  errorIntegral = errorIntegral + (errorNow * gainIntegral);      // Calculate the integral adjustment value " " "
-  errorDerivative = (errorPrevious - errorNow) * gainDerivative;  // Calculate the derivative adjustment value " " "
+  if ( setpointSpeed == 0 ) {
+    dac.setVoltage(0, false);
+  }
+  else {
+    errorNow = setpointSpeed - hallSpeed;                           // Difference between setpoint and actual
+    errorProportional = errorNow * gainProportional;                // Calculate the proportional adjustment value in terms of the input and setpoint units
+    errorIntegral = errorIntegral + (errorNow * gainIntegral);      // Calculate the integral adjustment value " " "
+    errorDerivative = (errorPrevious - errorNow) * gainDerivative;  // Calculate the derivative adjustment value " " "
+    
+    if ( errorIntegral > errorIntegralMax ) errorIntegral = errorIntegralMax;      // Limit the integral to prevent wind-up
+    else if ( errorIntegral < errorIntegralMin ) errorIntegral = errorIntegralMin;
   
-  if ( errorIntegral > errorIntegralMax ) errorIntegral = errorIntegralMax;      // Limit the integral to prevent wind-up
-  else if ( errorIntegral < errorIntegralMin ) errorIntegral = errorIntegralMin;
-
-  errorPrevious = errorNow;                                                      // Remember last measurement
-
-  outputAdjustmentFactor = errorProportional + errorIntegral + errorDerivative;  // Scale the output adjustment to a unit-agnostic factor
-  dacOutput = dacOutput + outputAdjustmentFactor;                                // Set the output value with the adjustment factor
-
-  if ( dacOutput < dacOutMin ) dacOutput = dacOutMin;                            // Limit the output to a valid range (Min)
-  else if ( dacOutput > dacOutMax ) dacOutput = dacOutMax;                       // (Max)
+    errorPrevious = errorNow;                                                      // Remember last measurement
   
-  dac.setVoltage(dacOutput, false);                                              // Update the output DAC
+    outputAdjustmentFactor = errorProportional + errorIntegral + errorDerivative;  // Scale the output adjustment to a unit-agnostic factor
+    dacOutput = dacOutput + outputAdjustmentFactor;                                // Set the output value with the adjustment factor
   
+    if ( dacOutput < dacOutMin ) dacOutput = dacOutMin;                            // Limit the output to a valid range (Min)
+    else if ( dacOutput > dacOutMax ) dacOutput = dacOutMax;                       // (Max)
+    
+    dac.setVoltage(dacOutput, false);                                              // Update the output DAC
+  }
 }
 
 void measurePower(){
@@ -145,14 +149,14 @@ void updateDisplay() {
   Serial.print(hallSpeed,3);
   Serial.print("  Setpoint: ");
   Serial.print(setpointSpeed,3);
-  Serial.print("  Factor: ");
+  Serial.print("\tFactor: ");
   if ( outputAdjustmentFactor > 0 ) Serial.print(" ");
   Serial.print(outputAdjustmentFactor,3);
-  Serial.print("  P: ");
+  Serial.print("\tP: ");
   Serial.print(errorProportional,3);
-  Serial.print("  I: ");
+  Serial.print("\tI: ");
   Serial.print(errorIntegral,3);
-  Serial.print("  D: ");
+  Serial.print("\tD: ");
   Serial.print(errorDerivative,3);
   Serial.println("");
 #endif
