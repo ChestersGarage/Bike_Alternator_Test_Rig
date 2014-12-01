@@ -8,39 +8,42 @@ Adafruit_MCP4725 dac;
 LiquidCrystal lcd(7, 8, 9, 10, 11, 12);
 
 // Hall sensor input variables
-const int hallTimeMin = 1200;              // The fastest possible motor speed, in micros() between sensor state changes
+//const int hallTimeMin = 1200;              // The fastest possible motor speed, in micros() between sensor state changes
 // To keep the math from going haywire, we limit the speed controller to a logarithmic boundary of 10:1
-const int hallTimeMax = hallTimeMin * 10;  // The slowest " " " before we just stop it entirely
-volatile int hallSenseCount = 0;           // Counts how many times the hall sensor has changed state
+//const int hallTimeMax = hallTimeMin * 10;  // The slowest " " " before we just stop it entirely
+volatile int hallSenseIndex = 0;           // Counts how many times the hall sensor has changed state
 
 // Setpoint input variables
 const int setpointPin = 0;  // The setpoint is on analog pin 0
 
 // Converted speed input and setpoint variables
-unsigned int speedMax = 30000;    // Max speed in MPH, multiplied by 1000 to reduce floating point math
-unsigned int speedMin = 3000;     // Min speed in MPH, multiplied by 1000 to reduce floating point math
-long int hallSpeed;               // The 
-long int errorNow;
+float speedMax = 30.0;    // Max speed in MPH, multiplied by 1000 to reduce floating point math
+float speedMin = 3.0;     // Min speed in MPH, multiplied by 1000 to reduce floating point math
+float hallSpeed = 0.0;               // The 
+long int hallSenseNow = 0;
+long int hallSenseLast = 0;
+long int hallSenseTimes[3] = {0,0,0};
+long int errorNow = 0;
 long int errorPrevious = 0;
-long int setpointSpeed;           // The setpoint value after we map() it to speed boundaries
+float setpointSpeed;           // The setpoint value after we map() it to speed boundaries
 
 // DAC output variables
 const int dacOutMin = 1650;   // The lowest usable DAC output value
 const int dacOutMax = 4095;   // The highest usable DAC output value
-      int dacOutput;          // The value sent to the DAC
+      int dacOutput = dacOutMin;          // The value sent to the DAC
 
 // PID compute parameters
 const float gainProportional = 0.01;  // How much to multiply the instataneous error between the input and setpoint
 const float gainIntegral = 0.001;      // How much to multiply the time-aggregated error between the input and the setpoint
 const float gainDerivative = 0.0025;    // How much to multiply the change in error frm the previous reading
-float errorProportional = 0;
-float errorIntegral = 0;
-float errorIntegralMax = speedMax/10;
-float errorIntegralMin = float(speedMax/10.0) * -1.0;
-float errorDerivative = 0;
-const int computePidInterval = 49;  // How often to update the DAC in millis() (should be an even division of one second, to avoid floating point math)
+float errorProportional = 0.0;
+float errorIntegral = 0.0;
+float errorIntegralMax = speedMax/10.0;
+float errorIntegralMin = speedMax/10.0 * -1.0;
+float errorDerivative = 0.0;
+const int computePidInterval = 50;  // How often to update the DAC in millis() (should be an even division of one second, to avoid floating point math)
 long  int computePidLast = 0;        // When the setpoint was last read
-float outputAdjustmentFactor;
+float outputAdjustmentFactor = 0.0;
 
 // Power measurement
 float altVoltage = 0.0;  // Output voltage of the alternator
@@ -49,7 +52,7 @@ long int measurePowerLast = 0;
 const int measurePowerInterval = 37;
 
 // Display variables
-//#define DEBUG                                  // Turns on Serial output
+#define DEBUG                                  // Turns on Serial output
 long  int updateDisplayLast = 0;
 const int updateDisplayInterval = 243;
 
@@ -57,9 +60,8 @@ void setup() {
   ina219.begin();
   lcd.begin(16, 2);
   dac.begin(0x60);
-  dacOutput = dacOutMin;
   dac.setVoltage(dacOutput, true);
-  attachInterrupt(0,hallSenseCountISR,CHANGE);
+  attachInterrupt(0,hallSenseISR,CHANGE);
   TWBR = ((F_CPU / 400000L) - 16) / 2;
 #ifdef DEBUG
   Serial.begin(115200);
@@ -70,7 +72,7 @@ void loop() {
   if ( millis() > computePidLast + computePidInterval ){
     computePidLast = millis();
     readSetpoint();
-    measureSpeed();
+    calculateSpeed();
     setDacOutput();
   }
   if ( millis() > measurePowerLast + measurePowerInterval ){
@@ -83,8 +85,12 @@ void loop() {
   }
 }
 
-void hallSenseCountISR() {
-  hallSenseCount ++;
+void hallSenseISR() {
+  hallSenseNow=micros();
+  hallSenseTimes[hallSenseIndex]=hallSenseNow-hallSenseLast;
+  hallSenseLast=hallSenseNow;
+  hallSenseIndex ++;
+  if ( hallSenseIndex > 2 ) hallSenseIndex=0;
 }
 
 void readSetpoint() {
@@ -93,17 +99,15 @@ void readSetpoint() {
     setpointSpeed = 0;
     return;
   }
-  setpointSpeed = map(setpointRaw,2,1023,speedMin,speedMax);
+  setpointSpeed = map(setpointRaw,2,1023,speedMin*1000.0,speedMax*1000.0)/1000.0;
 }
 
-void measureSpeed() {
-  int count = hallSenseCount;  // Quickly grab the counter value and rest it to avoid collision with the ISR
-  hallSenseCount = 0;
-  // 16 counts/rev, 11.64 inches/rev, 3600 s/h, 63360 in/mi
-  // Convert count/interval to count/second.
-  // Then offline dimensional analysis gives us a multiplying factor of 0.041335227 to get MPH
-  // To avoid floting point math, we use the factor*1,000,000 and then divide back down
-  hallSpeed = ((count * (1000 / computePidInterval)) * 41335) / 1000;  // Results in 1000*speed as noted in variable declarations above
+void calculateSpeed() {
+  int hallTimeAvg = (hallSenseTimes[0] + hallSenseTimes[1] + hallSenseTimes[2]) / 3;
+  // 1 count is: 0.0625 Rev / hallTimeAvg uS
+  // 16 counts/rev, 24.7400 inches/rev, 3600 s/h, 63360 in/mi
+  // Offline dimensional analysis gives us the following to convert to MPH
+  hallSpeed =  87855.11364 / hallTimeAvg;
 }
 
 void setDacOutput() {
@@ -115,14 +119,16 @@ void setDacOutput() {
   if ( errorIntegral > errorIntegralMax ) errorIntegral = errorIntegralMax;      // Limit the integral to prevent wind-up
   else if ( errorIntegral < errorIntegralMin ) errorIntegral = errorIntegralMin;
 
+  errorPrevious = errorNow;                                                      // Remember last measurement
+
   outputAdjustmentFactor = errorProportional + errorIntegral + errorDerivative;  // Scale the output adjustment to a unit-agnostic factor
   dacOutput = dacOutput + outputAdjustmentFactor;                                // Set the output value with the adjustment factor
+
   if ( dacOutput < dacOutMin ) dacOutput = dacOutMin;                            // Limit the output to a valid range (Min)
   else if ( dacOutput > dacOutMax ) dacOutput = dacOutMax;                       // (Max)
   
   dac.setVoltage(dacOutput, false);                                              // Update the output DAC
   
-  errorPrevious = errorNow;                                                      // Remember last measurement
 }
 
 void measurePower(){
@@ -136,9 +142,9 @@ void updateDisplay() {
   if ( errorNow > 0 ) Serial.print(" ");
   Serial.print(errorNow);
   Serial.print("  Speed: ");
-  Serial.print(float(hallSpeed)/1000.0,3);
+  Serial.print(hallSpeed,3);
   Serial.print("  Setpoint: ");
-  Serial.print(float(setpointSpeed)/1000.0,3);
+  Serial.print(setpointSpeed,3);
   Serial.print("  Factor: ");
   if ( outputAdjustmentFactor > 0 ) Serial.print(" ");
   Serial.print(outputAdjustmentFactor,3);
